@@ -1,0 +1,14 @@
+#Applicable to L1A data
+#x bounds are wavlength in nm
+#y bounds are zenith angle in degrees
+#
+#key,start,end
+5577,557.555, 557.715
+5577_bg1, 557.37,557.53
+5577_bg2, 557.87,558.03
+5577_za, -10,10
+#
+6300,629.85, 630.15
+6300_bg1,629.52, 629.82
+6300_bg2,630.18,630.47999
+6300_za, -10,10
