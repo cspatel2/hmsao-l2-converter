@@ -25,7 +25,7 @@ def find_feature_width_core(data:np.ndarray,wavelength:np.ndarray, prominence:fl
     peaks,_ = find_peaks(lf, prominence=prominence)
     len(peaks)
     if len(peaks) == 0:
-        return None, None
+        return np.nan, np.nan
     widths, height,left,right = peak_widths(lf, peaks, rel_height=rel_height)
     return float(wavelength[round(left[0])]), float(wavelength[round(right[0])]) 
 #%%
@@ -51,6 +51,7 @@ def get_feature_bounds(win:str, da:xr.DataArray, bgoffset:float=0.01, prominence
         output_core_dims=[[], []],      # TWO scalar outputs
         vectorize=True,
         dask='parallelized',
+        dask_gufunc_kwargs={'allow_rechunk': True},
         kwargs={'prominence': prominence, 'rel_height': rel_height}
     )
     l_start, l_stop = l_start.data, l_stop.data
