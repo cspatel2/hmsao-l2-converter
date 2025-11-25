@@ -386,10 +386,10 @@ def parse_and_check_args(parser: argparse.ArgumentParser) -> Tuple[argparse.Name
         raise ValueError(f'Root path {rootdir} is not a directory.')
     # check for data
     root_glob = ''
-    l1c_files = sorted(rootdir.glob('*l1c*.nc'))
+    l1c_files = sorted(rootdir.glob('*.nc'))
     if len(l1c_files) < 1:  # no.nc files in rootdir, check if subdirs havee .nc files
         root_glob = '**/'
-        l1c_files = sorted(rootdir.glob(root_glob + '*l1c*.nc'))
+        l1c_files = sorted(rootdir.glob(root_glob + '*.nc'))
         if len(l1c_files) < 1:  # no .nc files in subdirs either
             raise ValueError(
                 f'No L1C files found in root directory {rootdir} or subdirectories.')
@@ -431,7 +431,7 @@ def parse_and_check_args(parser: argparse.ArgumentParser) -> Tuple[argparse.Name
         if args.soldir is not None:
             valid_windows = [w for w in valid_windows if len(
                 # type: ignore
-                list(soldir.glob(solar_glob + f'*{w}*.nc'))) > 0]
+                list(soldir.glob(solar_glob + f'*{w}*.nc'))) > 0] # type: ignore
         if len(valid_windows) < 1:
             raise ValueError(
                 f'None of the provided windows {args.windows} exist in the data.')
