@@ -211,7 +211,7 @@ def l1c_to_l2_converter(win: str, date: str, args: argparse.Namespace, root_glob
     nds = nds.assign(noise=coarsen.reduce(rms_func).noise)
 
     # 3. separate daytime and nighttime data
-    civil_twilight = 90 + 6  #deg
+    civil_twilight = 90 + 12  #deg
     # sza > twilight_cutoff is night, sza <= twilight_cutoff is day
     daytime_sza_cutoff = civil_twilight
     dayds = nds.where(nds.sza <= daytime_sza_cutoff, drop=True)
