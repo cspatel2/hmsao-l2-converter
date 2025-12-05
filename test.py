@@ -23,3 +23,27 @@ for i, val in enumerate([('5577','Greens'), ('6300','Reds')]):
     da.plot(y = 'za', x = 'time', vmin = vmin, vmax = vmax, cmap=color, ax = ax[i]) #type: ignore
 ax[0].set_xlabel('')
 # %%
+from sza import solar_zenith_angle
+
+datadir = Path('/home/charmi/locsststor/proc/hmsao/l1c')
+date = '20250320'
+win = '6300'
+fns = list(datadir.glob(f'*{date}*{win}*.nc'))
+fns.sort()
+# %%
+ds = xr.open_mfdataset(fns)
+ds = ds.assign_coords(time = (('tstamp'),[datetime.fromtimestamp(t, tz=UTC) for t in ds.tstamp.data]))
+LOCATION = {'lat': 67.84080792078719, 'lon':20.410176855991722, 'elev':100 } #irf sweden
+ds = ds.assign_coords( sza = ('tstamp', [solar_zenith_angle(t, lat=LOCATION['lat'],
+                  lon=LOCATION['lon'], elevation=LOCATION['elev']) for t in ds.tstamp.values]))
+#
+# %%
+fig, ax = plt.subplots(figsize=(10,6))
+ds.intensity.sum('za').sum('wavelength').plot(x='time', ax = ax) #type: ignore
+cax = ax.twinx()
+ds.sza.plot(x='time', color='orange', ax = cax)
+# ax.axvline(datetime(2025,3,20,17,30,0, tzinfo=UTC), color='red', linestyle='--')
+ax.axvline(ds.time.values[-200], color='red', linestyle='--')
+# %%
+ds.sza.sel(tstamp=ds.tstamp.values[-200]).values
+# %%

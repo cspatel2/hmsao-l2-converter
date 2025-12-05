@@ -27,6 +27,7 @@ PLOT = True
 win = '5577'
 datadir = Path('../data/l1c')
 fns = np.sort(np.unique(list(datadir.glob(f'*{win}*.nc')))) #type: ignore
+
 #%%
 LOCATION = {'lon': 24.41, 'lat': 67.84, 'elev': 420}
 
