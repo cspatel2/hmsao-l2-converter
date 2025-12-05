@@ -47,3 +47,5 @@ ax.axvline(ds.time.values[-200], color='red', linestyle='--')
 # %%
 ds.sza.sel(tstamp=ds.tstamp.values[-200]).values
 # %%
+ds.noise.isel(tstamp = 0).plot()
+# %%

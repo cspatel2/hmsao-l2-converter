@@ -30,7 +30,7 @@ def str2bool(value: str) -> bool:
 
 
 def rms_func(data, axis=None):
-    return np.sqrt(np.sum(data**2, axis=axis))
+    return np.sqrt(np.nansum(data**2, axis=axis))
 
 
 def find_peak_wavelength(ds: xr.DataArray, sza_cutoff: float = 108) -> float:
