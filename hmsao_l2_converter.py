@@ -10,7 +10,7 @@ import argparse
 from pathlib import Path
 from functions import get_feature_bounds
 from time import perf_counter_ns
-
+from util_functions import apply_alignment, apply_solar_subtraction
 import numpy as np
 import xarray as xr
 from sza import solar_zenith_angle
@@ -39,7 +39,7 @@ def find_peak_wavelength(ds: xr.DataArray, sza_cutoff: float = 108) -> float:
         ds = ds.where(ds.sza > sza_cutoff, drop=True)
     except:
         pass
-    b = ds.intensity.sum('za').mean('tstamp')
+    b = ds.intensity.sum('za', skipna=True).mean('tstamp')
     return float(b.idxmax('wavelength').values)
 
 
@@ -198,6 +198,9 @@ def l1c_to_l2_converter(win: str, date: str, args: argparse.Namespace, root_glob
 
     #### PREPRING DATASET ##########
     # 1. remove kunnecesarry variables, add them back to final ds
+    xlims = [val for key, val in bdict.items()]
+    wlslice = slice(min(xlims), max(xlims))
+    nds = nds.sel(wavelength=wlslice)
     sza = nds.sza
     exposure = nds.exposure
     ccdtemp = nds.ccdtemp
@@ -220,21 +223,32 @@ def l1c_to_l2_converter(win: str, date: str, args: argparse.Namespace, root_glob
     # 4. process daytime data if solar dir is provided
     if args.soldir is not None:
         # get solar data file for this window and date
-        solar_fnames = sorted(Path(args.soldir).glob(
-            root_glob + f'*{date}*{win}*.nc'))
+        solar_fnames = sorted(Path(args.soldir).glob(f'*{win}*.nc'))
         solards = xr.open_mfdataset(solar_fnames, combine='by_coords')
-        solards = solards.drop_vars(['exposure', 'ccdtemp'])
+        solards = solards.sel(wavelength=wlslice)
+        solards = solards.drop_vars(['exposure', 'ccdtemp', 'za'])
         # bin solar data along za
         solar_coarsen = solards.coarsen(za=ZABINSIZE, boundary='trim')
-        solards = solar_coarsen.sum(skipna=True)  # type: ignore
-        solards = solards.assign(noise=solar_coarsen.reduce(rms_func).noise)
+        solards = solar_coarsen.mean(skipna=True) #type: ignore
+        solards = solards.assign(noise = solar_coarsen.reduce(rms_func).noise)
+        solards = solards.mean('tstamp', skipna=True)
+        intensity_attrs = solards.intensity.attrs
+        noise_attrs = solards.noise.attrs
 
         # do solar subtraction to extract emission spectra
         # 1.  match peaks of both spectra
+        a = apply_alignment(solards, dayds.copy(), -0.015)
+        solards['intensity'] = a.mean('tstamp', skipna=True)
         # 2. scale solar spectra to match peak intensity in data spectra
         # 3. subtract scaled solar spectra from data spectra
+        
+        s = apply_solar_subtraction(solards, dayds)
+        dayds['intensity'] = s
+        dayds.intensity.attrs  = intensity_attrs
+        dayds.noise.attrs  = noise_attrs
     else:
-        # if no solar subtraction, set daytime data to nan
+        print('No solar directory provided. Skipping daytime data processing.')
+        # # if no solar subtraction, set daytime data to nan
         dayds.intensity.data = np.full(dayds.intensity.shape, np.nan)
         dayds.noise.data = np.full(dayds.noise.shape, np.nan)
 
@@ -242,6 +256,8 @@ def l1c_to_l2_converter(win: str, date: str, args: argparse.Namespace, root_glob
     del nds
     nds = xr.concat([dayds, nightds], dim='tstamp')
     nds = nds.sortby('tstamp')
+    nds.intensity.attrs = ds.intensity.attrs
+    nds.noise.attrs = ds.noise.attrs
     # del dayds, nightds
 
     #### line brightness calculation ##########
@@ -407,10 +423,10 @@ def parse_and_check_args(parser: argparse.ArgumentParser) -> Tuple[argparse.Name
             raise ValueError(f'Solar path {soldir} is not a directory.')
         else:  # exits and is dir, check for .nc files
             solar_glob = ''
-            solar_files = sorted(soldir.glob(solar_glob+'*l1c*.nc'))
+            solar_files = sorted(soldir.glob(solar_glob+'*.nc'))
             if len(solar_files) < 1:  # no .nc files in rootdir,  check if subdirs havee .nc files
                 solar_glob = '**/'
-                solar_files = sorted(soldir.glob(solar_glob+'*l1c*.nc'))
+                solar_files = sorted(soldir.glob(solar_glob+'*.nc'))
                 if len(solar_files) < 1:  # no .nc files in subdirs either
                     raise ValueError(
                         f'No Solar L1C files found in solar directory {soldir} or subdirectories.')

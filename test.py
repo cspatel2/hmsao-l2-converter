@@ -1,4 +1,5 @@
 #%%
+from matplotlib.pylab import f
 import xarray as xr
 import numpy as np
 import matplotlib.pyplot as plt
@@ -48,4 +49,18 @@ ax.axvline(ds.time.values[-200], color='red', linestyle='--')
 ds.sza.sel(tstamp=ds.tstamp.values[-200]).values
 # %%
 ds.noise.isel(tstamp = 0).plot()
+# %%
+#%%
+datadir = Path('/home/charmi/locsststor/proc/hmsao/l2/daytime')
+fns = list(datadir.glob(f'*/*.nc'))
+# %%
+fns
+# %%
+ds = xr.open_dataset(fns[0])
+# %%
+ds['6300'].plot(vmax = 1e11)
+# %
+
+# %%
+ds['6300'].isel(tstamp = 300).plot()
 # %%
