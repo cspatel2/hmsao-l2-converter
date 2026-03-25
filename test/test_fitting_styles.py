@@ -5,7 +5,7 @@ import xarray as xr
 from pathlib import Path
 
 from yaml import warnings    
-from functions import get_bounds_from_csv
+from l2_converter.l2_helper_functions import get_bounds_from_csv
 from scipy.ndimage import gaussian_filter1d
 from scipy.signal import find_peaks, peak_widths
 # %%

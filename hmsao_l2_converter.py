@@ -1,14 +1,19 @@
 # %%
+from ast import arg
 from math import isclose
 import os
 import sys
 from glob import glob
+from dataclasses import dataclass
+from matplotlib import pyplot as plt
+from matplotlib.style import available
 from tqdm import tqdm
 from typing import Dict, List, Tuple, Iterable
 from typing import SupportsFloat as Numeric
 import argparse
 from pathlib import Path
-from functions import get_feature_bounds
+import re
+
 from time import perf_counter_ns
 from util_functions import apply_alignment, apply_solar_subtraction
 import numpy as np
@@ -17,6 +22,10 @@ from sza import solar_zenith_angle
 from itertools import chain
 from datetime import datetime
 from pytz import timezone, UTC
+
+LOCALPATH = os.path.dirname(os.path.realpath(__file__))
+sys.path.append(os.path.join(LOCALPATH))
+from l2_converter.l2_helper_functions import get_feature_bounds
 
 # %%
 
@@ -43,134 +52,83 @@ def find_peak_wavelength(ds: xr.DataArray, sza_cutoff: float = 108) -> float:
     return float(b.idxmax('wavelength').values)
 
 
+# def get_win_from_fn(fn: str | Path) -> str:
+#     if isinstance(fn, str):
+#         fn = Path(fn)
+#     return fn.stem.split('_')[-1].split('[')[0]
+
+
 def get_win_from_fn(fn: str | Path) -> str:
     if isinstance(fn, str):
         fn = Path(fn)
-    return fn.stem.split('_')[-1].split('[')[0]
-
+    return str(re.findall(r"\d+", fn.stem)[-2])
 
 def get_date_from_fn(fn: str | Path) -> str:
     if isinstance(fn, str):
         fn = Path(fn)
-    return fn.stem.split('_')[-2]
+    return str(re.findall(r"\d+", fn.stem)[-3])
+
+# def get_date_from_fn(fn: str | Path) -> str:
+#     if isinstance(fn, str):
+#         fn = Path(fn)
+#     return fn.stem.split('_')[-2]
 
 
 # %% Parser arguments
-parser = argparse.ArgumentParser(
-    description='Convert L1C data (calibrated images) to L2 data (line brightness).')
 
-parser.add_argument(
-    'rootdir',
-    metavar='rootdir',
-    type=str,
-    help='Root directory of L1A data'
-)
-
-parser.add_argument(
-    'destdir',
-    metavar='destdir',
-    # required = False,
-    type=str,
-    default=Path.cwd(),
-    nargs='?',
-    help='Root directory where L1 data will be stored.'
-)
-
-parser.add_argument(
-    'dest_prefix',
-    metavar='dest_prefix',
-    # required = False,
-    type=str,
-    default=None,
-    nargs='?',
-    help='Prefix of the saved L1 data finename.'
-)
-
-parser.add_argument(
-    '--overwrite',
-    required=False,
-    type=str2bool,
-    default=False,
-    nargs='?',
-    help='If True, overwrites existing file. If false, skips processing if file exists. Defaults to False.'
-)
-
-parser.add_argument(
-    '--zabinsize',
-    type=float,
-    default=None,
-    nargs='?',
-    help='bBinsize of Zenith Angle (za | y-axis) in deg. Defaults to 1.5 deg.'
-)
-
-
-def list_of_strings(arg: str) -> List[str]:
-    return arg.split(',')
-
-
-parser.add_argument(
-    '--windows',
-    # metavar = 'NAME',
-    # action='append',
-    required=False,
-    type=list_of_strings,
-    default=None,
-    nargs='?',
-    help='Window(s) to process (list of str i.e. "1235", "3456").'
-)
-
-parser.add_argument(
-    '--dates',
-    required=False,
-    type=list_of_strings,
-    default=None,
-    nargs='?',
-    help='Dates to process in the format YYYYMMDD  (list seperated by commas).'
-)
-
-parser.add_argument(
-    '--location',
-    required=True,
-    type=float,
-    nargs=3,
-    help='Latitude (deg) Longitude (deg) Elevation (m) of the observation site.'
-)
-
-parser.add_argument(
-    '--soldir',
-    required=False,
-    type=str,
-    default=None,
-    nargs='?',
-    help='Directory path for Solar Spectra l1c file (.nc).'
-)
 # %%
 # %%
 
+@dataclass
+class L2Config:
+    """config dataclass object for level 2 conversion
+    Arguments:
+        rootdir: Root directory of L1C data
+        destdir: Root directory where L2 data will be stored.
+        dest_prefix: Prefix of the saved L2 data filename.
+        overwrite: If True, overwrites existing file. If false, skips processing if file exists. Defaults to False.
+        zabinsize: Binsize of Zenith Angle (za | y-axis) in deg. Defaults to 1.5 deg.
+        windows: Window(s) to process (list of str i.e. "1235", "3456"). Defaults to None, which processes all available windows.
+        dates: Dates to process in the format YYYYMMDD  (list seperated by commas). Defaults to None, which processes all available dates.
+        obs_location: Latitude (deg) Longitude (deg) Elevation (m) of the observation site.
+        soldir: Directory path for Solar Spectra l1c file (.nc). If None, skips daytime data processing and sets daytime line brightness to nan.
 
-def l1c_to_l2_converter(win: str, date: str, args: argparse.Namespace, root_glob: str = '', save: bool = True) -> xr.Dataset | None:
+    """    
+    rootdir: str | Path
+    destdir: str | Path
+    dest_prefix: str
+    overwrite: bool
+    zabinsize: float
+    windows: List[str]
+    dates: List[str]
+    obs_location: Tuple[float, float, float]
+    soldir: str | Path | None = ''
+    save: bool = True
+
+    
+def l1c_to_l2_converter(win: str, date: str, config: L2Config, root_glob: str = '') -> xr.Dataset | None:
     # LOCATION
     LOCATION = {
-        'lat': float(args.location[0]),
-        'lon': float(args.location[1]),
-        'elev': float(args.location[2])
+        'lat': float(config.obs_location[0]),
+        'lon': float(config.obs_location[1]),
+        'elev': float(config.obs_location[2])
     }
 
     yymm = datetime.strptime(date, '%Y%m%d').strftime('%Y%m')
-    outfn = Path(args.destdir).joinpath(
-        yymm, f"{args.dest_prefix}_{date}_{win}.nc")
+    outfn = Path(config.destdir).joinpath(
+        yymm, f"{config.dest_prefix}_{date}_{win}.nc")
     outfn.parent.mkdir(parents=True, exist_ok=True)
 
     # check overwrite
-    if outfn.exists() and args.overwrite:
+    if outfn.exists() and config.overwrite:
         outfn.unlink()
         print(f'{outfn} removed, overwriting...')
-    elif outfn.exists() and not args.overwrite:
+    elif outfn.exists() and not config.overwrite:
         print(f'{outfn} exists, skipping...')
         return None
 
     # get data files for this window and date
-    fnames = sorted(Path(args.rootdir).glob(root_glob + f'*{date}*{win}*.nc'))
+    fnames = sorted(Path(config.rootdir).glob(root_glob + f'*{date}*{win}*.nc'))
 
     # initialize
     ds = xr.open_mfdataset(fnames, combine='by_coords')
@@ -183,7 +141,7 @@ def l1c_to_l2_converter(win: str, date: str, args: argparse.Namespace, root_glob
     nds.sza.attrs = {'units': 'deg', 'long_name': 'Solar Zenith Angle'}
 
     # calc feature bounds
-    astro_twilight = 90 + 18  # deg
+    astro_twilight = 90 + 6  # deg
     wlslice = slice(wl - 0.1, wl + 0.1)
     da = nds.where(nds.sza > astro_twilight, drop=True)  # nighttime only
     da = da.intensity.sel(wavelength=wlslice).sum(dim='tstamp', skipna=True)
@@ -207,23 +165,23 @@ def l1c_to_l2_converter(win: str, date: str, args: argparse.Namespace, root_glob
     nds = nds.drop_vars(['exposure', 'ccdtemp'])
 
     # 2. bin data along za
-    ZABINSIZE = int(np.ceil(args.zabinsize/np.mean(np.diff(nds.za.values))))
+    ZABINSIZE = int(np.ceil(config.zabinsize/np.mean(np.diff(nds.za.values))))
     # bin
     coarsen = nds.coarsen(za=ZABINSIZE, boundary='trim')
     nds = coarsen.sum(skipna=True)  # type: ignore
     nds = nds.assign(noise=coarsen.reduce(rms_func).noise)
 
     # 3. separate daytime and nighttime data
-    civil_twilight = 90 + 12  #deg
+    civil_twilight = 90 + 6  #deg
     # sza > twilight_cutoff is night, sza <= twilight_cutoff is day
     daytime_sza_cutoff = civil_twilight
     dayds = nds.where(nds.sza <= daytime_sza_cutoff, drop=True)
     nightds = nds.where(nds.sza > daytime_sza_cutoff, drop=True)
 
     # 4. process daytime data if solar dir is provided
-    if args.soldir is not None:
+    if config.soldir is not None:
         # get solar data file for this window and date
-        solar_fnames = sorted(Path(args.soldir).glob(f'*{win}*.nc'))
+        solar_fnames = sorted(Path(config.soldir).glob(f'*{win}*.nc'))
         solards = xr.open_mfdataset(solar_fnames, combine='by_coords')
         solards = solards.sel(wavelength=wlslice)
         solards = solards.drop_vars(['exposure', 'ccdtemp', 'za'])
@@ -334,7 +292,7 @@ def l1c_to_l2_converter(win: str, date: str, args: argparse.Namespace, root_glob
     dslist = [lds, bckds]
     saveds = xr.merge(dslist, compat='override')
 
-    if args.soldir is None: # make sure the daytimne data is nan if no solar data provided
+    if config.soldir is None: # make sure the daytimne data is nan if no solar data provided
         saveds[f'{win}'].sel(tstamp = dayds.tstamp.data).data = np.full((dayds.tstamp.size, dayds.za.size), np.nan)
         saveds[f'bg'].sel(tstamp = dayds.tstamp.data).data = np.full((dayds.tstamp.size, dayds.za.size), np.nan)
 
@@ -362,7 +320,7 @@ def l1c_to_l2_converter(win: str, date: str, args: argparse.Namespace, root_glob
         "%m/%d/%Y, %H:%M:%S EDT")
     saveds.attrs['Location'] = f"lat: {LOCATION['lat']} deg, lon: {LOCATION['lon']} deg, elev: {LOCATION['elev']} m"
 
-    if save:
+    if config.save:
         # 3. save dataset
         encoding = {var: {'zlib': True}
                     for var in (*saveds.data_vars.keys(), *saveds.coords.keys())}
@@ -377,135 +335,215 @@ def l1c_to_l2_converter(win: str, date: str, args: argparse.Namespace, root_glob
         return saveds
 # %%
 
+def main(config: L2Config):
+    """ converts L1C files to L2 files. This includes:
+     1. calculating line intensities of each spectral feature.
+     2. background subtraction using the defined background windows and calculating background line intensity.
+     3. adding new attributes like solar zenith angle, exposure time, ccd temperature, and a boolean for day/night.
 
-def parse_and_check_args(parser: argparse.ArgumentParser) -> Tuple[argparse.Namespace, str]:
-    args = parser.parse_args()
+    Args:
+        config (L2Config): Configuration dataclass for L2 conversion.
+            arguments:
+                - rootdir: Root directory of L1C data
+                - destdir: Root directory where L2 data will be stored.
+                - dest_prefix: Prefix of the saved L2 data filename.
+                - overwrite: If True, overwrites existing file. If false, skips processing if file exists. Defaults to False.
+                - zabinsize: Binsize of Zenith Angle (za | y-axis) in deg. Defaults to 1.5 deg.
+                - windows: Window(s) to process (list of str i.e. "1235", "3456"). Defaults to None, which processes all available windows.
+                - dates: Dates to process in the format YYYYMMDD  (list seperated by commas). Defaults to None, which processes all available dates.
+                - obs_location: Latitude (deg) Longitude (deg) Elevation (m) of the observation site.
+                - soldir: Directory path for Solar Spectra l1c file (.nc). If None, skips daytime data processing and sets daytime line brightness to nan.
+
+    Raises:
+        ValueError: Invalid boolean value for overwrite argument.
+        ValueError: Root directory does not exist or is not a directory.
+        ValueError: No L1C files found in root directory or subdirectories.
+        ValueError: Solar directory does not exist or is not a directory.
+        ValueError: No Solar L1C files found in solar directory or subdirectories.
+        ValueError: Could not find feature bounds for a given window and date. Check data quality or adjust get_feature_bounds parameters.  
+    """    
 
     ############## CHECK DIRECTORIES ##############
-
     # DESTINATION DIR
-    destdir = Path(args.destdir)
-    if not destdir.exists():
-        print(
-            f'Destination directory {destdir} does not exist. creating it...')
-        destdir.mkdir(parents=True, exist_ok=True)
-        print(f'Directory {destdir} created.')
-    else:
-        if not destdir.is_dir():
-            raise ValueError(f'Destination path {destdir} is not a directory.')
+    if isinstance(config.destdir, str):
+        config.destdir = Path(config.destdir)
+    config.destdir = config.destdir.expanduser()
+    config.destdir.mkdir(parents=True, exist_ok=True)
 
     # ROOT DIR
-    rootdir = Path(args.rootdir)
-    if not rootdir.exists():
-        raise ValueError(f'Root directory {rootdir} does not exist.')
-    elif not rootdir.is_dir():
-        raise ValueError(f'Root path {rootdir} is not a directory.')
+    if isinstance(config.rootdir, str):
+        config.rootdir = Path(config.rootdir)
+    config.rootdir = config.rootdir.expanduser()
+    if not config.rootdir.exists():
+        raise ValueError(f'Root directory {config.rootdir} does not exist.')
+    elif not config.rootdir.is_dir():
+        raise ValueError(f'Root path {config.rootdir} is not a directory.')
     # check for data
     root_glob = ''
-    l1c_files = sorted(rootdir.glob('*.nc'))
+    l1c_files = sorted(config.rootdir.glob('*.nc'))
     if len(l1c_files) < 1:  # no.nc files in rootdir, check if subdirs havee .nc files
         root_glob = '**/'
-        l1c_files = sorted(rootdir.glob(root_glob + '*.nc'))
+        l1c_files = sorted(config.rootdir.glob(root_glob + '*.nc'))
         if len(l1c_files) < 1:  # no .nc files in subdirs either
             raise ValueError(
-                f'No L1C files found in root directory {rootdir} or subdirectories.')
+                f'No L1C files found in root directory {config.rootdir} or subdirectories.')
         else:
             ...  # if subdirs needed, make the list here
 
     # SOLAR DIR
-    if args.soldir is None:
+    if config.soldir == '':
         print('No solar directory provided. No daytime data will be processed.')
-    else:  # string is provided, check it
-        soldir = Path(args.soldir)
-        if not soldir.exists():  # does it exists?
-            raise ValueError(f'Solar directory {soldir} does not exist.')
-        elif not soldir.is_dir():  # is it a dir?
-            raise ValueError(f'Solar path {soldir} is not a directory.')
+        config.soldir = None
+    elif isinstance(config.soldir, str):
+        config.soldir = Path(config.soldir)
+        config.soldir = config.soldir.expanduser()
+        if not config.soldir.exists():  # does it exists?
+            raise ValueError(f'Solar directory {config.soldir} does not exist.')
+        elif not config.soldir.is_dir():  # is it a dir?
+            raise ValueError(f'Solar path {config.soldir} is not a directory.')
         else:  # exits and is dir, check for .nc files
             solar_glob = ''
-            solar_files = sorted(soldir.glob(solar_glob+'*.nc'))
+            solar_files = sorted(config.soldir.glob(solar_glob+'*.nc'))
             if len(solar_files) < 1:  # no .nc files in rootdir,  check if subdirs havee .nc files
                 solar_glob = '**/'
-                solar_files = sorted(soldir.glob(solar_glob+'*.nc'))
+                solar_files = sorted(config.soldir.glob(solar_glob+'*.nc'))
                 if len(solar_files) < 1:  # no .nc files in subdirs either
                     raise ValueError(
-                        f'No Solar L1C files found in solar directory {soldir} or subdirectories.')
+                        f'No Solar L1C files found in solar directory {config.soldir} or subdirectories.')
                 else:
                     ...  # if subdirs needed, make the list here
 
     ############## PROCESSING PARAMETERS ##############
-
     # WINDOWS TO PROCESS
-    if args.windows is None:
-        print('No windows provided. Processing all available windows.')
-        valid_windows = np.unique([get_win_from_fn(f) for f in l1c_files])
-    else:
-        # check if win exists in data
-        valid_windows = [w for w in args.windows for w in args.windows if len(
-            list(rootdir.glob(root_glob + f'*{w}*.nc'))) > 0]  # type: ignore
-        # check if win exists in sol data
-        if args.soldir is not None:
-            valid_windows = [w for w in valid_windows if len(
-                # type: ignore
-                list(soldir.glob(solar_glob + f'*{w}*.nc'))) > 0] # type: ignore
-        if len(valid_windows) < 1:
-            raise ValueError(
-                f'None of the provided windows {args.windows} exist in the data.')
+    available_windows = np.unique([get_win_from_fn(f) for f in l1c_files])
 
-    args.windows = valid_windows
-    print(f'Processing windows: {args.windows}')
+    if config.windows == [''] or config.windows is None:
+        print('No windows provided. Processing all available windows.')
+        valid_windows = available_windows.tolist()
+    else:
+        valid_windows =list(set(config.windows) & set(available_windows))
+    config.windows = valid_windows # reassign to config for later use
+
+    print(f'Processing windows: {config.windows}')
 
     # DATES TO PROCESS
     all_valid_dates = np.unique([get_date_from_fn(f) for f in l1c_files])
-    if args.dates is None:
+    print(f'Available dates in data: {all_valid_dates}')
+    if config.dates == [''] or config.dates is None:
         print('No dates provided. Processing all available dates.')
-        print(f'Processing dates: {all_valid_dates}')
-        args.dates = sorted(all_valid_dates)
+        valid_dates = all_valid_dates
     else:
-        valid_dates = [d for d in args.dates if d in all_valid_dates]
-        if len(valid_dates) < 1:
-            raise ValueError(
-                f'None of the provided dates {args.dates} exist in the data.')
-        args.dates = sorted(valid_dates)  # reassign to args for later use
-        print(f'Processing dates: {args.dates}')
+        valid_dates = list(set(config.dates) & set(all_valid_dates))
+    config.dates = valid_dates  # reassign to config for later use
+    print(f'Processing dates: {config.dates}')
 
     # DESTINATION PREFIX
     # if no prefix provided, use rootdir name
-    if args.dest_prefix is None:
+    if config.dest_prefix is None or config.dest_prefix == '':
         dest_prefix = 'hmsao-l2'
         print(
             f'No destination prefix provided. Using default prefix: {dest_prefix}')
     else:
-        dest_prefix = args.dest_prefix
-        if 'l2' not in args.dest_prefix.lower():
+        dest_prefix = config.dest_prefix
+        if 'l2' not in config.dest_prefix.lower():
             dest_prefix += '_l2'
-    args.dest_prefix = dest_prefix  # reassign to args for later use
+    config.dest_prefix = dest_prefix  # reassign to config for later use
 
     # ZENITH ANGLE BINSIZE
-    if args.zabinsize is None:
-        args.zabinsize = 1.5
+    if config.zabinsize is None:
+        config.zabinsize = 1.5
     else:
-        args.zabinsize = float(args.zabinsize)
+        config.zabinsize = float(config.zabinsize)
 
-    return args, root_glob
+    for win in tqdm(config.windows):
+        for date in config.dates:
+            l1c_to_l2_converter(win, date, config, root_glob=root_glob)
 
-
-def main(parser: argparse.ArgumentParser, save: bool = True):
-    args, root_glob = parse_and_check_args(parser)
-    # PROCESSING LOOP
-    for win in args.windows:
-        for date in tqdm(args.dates, desc=f'Processing window {win}'):
-            if save:
-                l1c_to_l2_converter(
-                    win, date, args, root_glob=root_glob, save=save)
-            else:
-                ds = l1c_to_l2_converter(
-                    win, date, args, root_glob=root_glob, save=save)
-                return ds
 
 
 # %%
+
 if __name__ == '__main__':
-    main(parser)
+    parser = argparse.ArgumentParser(
+    description='Convert L1C data (calibrated images) to L2 data (line brightness).')
+    parser.add_argument('rootdir',
+        metavar='rootdir',
+        type=str,
+        help='Root directory of L1A data'
+    )
+    parser.add_argument('destdir',
+        metavar='destdir',
+        # required = False,
+        type=str,
+        default=Path.cwd(),
+        nargs='?',
+        help='Root directory where L1 data will be stored.'
+    )
+    parser.add_argument('dest_prefix',
+        metavar='dest_prefix',
+        # required = False,
+        type=str,
+        default=None,
+        nargs='?',
+        help='Prefix of the saved L1 data finename.'
+    )
+    parser.add_argument('--overwrite',
+        required=False,
+        type=str2bool,
+        default=False,
+        nargs='?',
+        help='If True, overwrites existing file. If false, skips processing if file exists. Defaults to False.'
+    )
+    parser.add_argument('--zabinsize',
+        type=float,
+        default=None,
+        nargs='?',
+        help='bBinsize of Zenith Angle (za | y-axis) in deg. Defaults to 1.5 deg.'
+    )
+    def list_of_strings(arg: str) -> List[str]:
+        return arg.split(',')
+    parser.add_argument('--windows',
+        # metavar = 'NAME',
+        # action='append',
+        required=False,
+        type=list_of_strings,
+        default=None,
+        nargs='?',
+        help='Window(s) to process (list of str i.e. "1235", "3456").'
+    )
+    parser.add_argument('--dates',
+        required=False,
+        type=list_of_strings,
+        default=None,
+        nargs='?',
+        help='Dates to process in the format YYYYMMDD  (list seperated by commas).'
+    )
+    parser.add_argument('--location',
+        required=True,
+        type=float,
+        nargs=3,
+        help='Latitude (deg) Longitude (deg) Elevation (m) of the observation site.'
+    )
+    parser.add_argument('--soldir',
+        required=False,
+        type=str,
+        default=None,
+        nargs='?',
+        help='Directory path for Solar Spectra l1c file (.nc).'
+    )
+    
+    args = parser.parse_args()
 
-# %%
+    config = L2Config(
+        rootdir=args.rootdir,
+        destdir=args.destdir,
+        dest_prefix=args.dest_prefix,
+        overwrite=args.overwrite,
+        zabinsize=args.zabinsize,
+        windows=args.windows,
+        dates=args.dates,
+        obs_location=tuple(args.location),
+        soldir=args.soldir
+    )
+    main(config)
+

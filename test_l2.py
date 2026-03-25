@@ -8,7 +8,7 @@ import pytz
 import xarray as xr
 from typing import Iterable
 import matplotlib.pyplot as plt
-from functions import get_feature_bounds
+from l2_converter.l2_helper_functions import get_feature_bounds
 from pathlib import Path
 
 from sza import solar_zenith_angle

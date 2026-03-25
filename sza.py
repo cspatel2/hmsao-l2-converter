@@ -1,6 +1,7 @@
 # %%
 from __future__ import annotations
 from datetime import datetime, timezone, timedelta
+from arrow import get
 import astropy.units as u
 from astropy.coordinates import EarthLocation, AltAz
 from astropy.time import Time
@@ -10,6 +11,7 @@ import numpy as np
 from typing import Iterable, SupportsFloat as Numeric
 from pytz import UTC
 from pysolar.solar import get_altitude
+from suncalc import get_position, get_times
 
 
 # %%
@@ -49,14 +51,19 @@ if __name__ == '__main__':
     longitude = 20.41
     latitude = 67.84 
     elevation = 420 # Approximate elevation
-    print(type(datetime))
-    test_date = datetime(2025, 3, 20, tzinfo=timezone.utc) 
+    test_date = datetime(2025, 11, 17, tzinfo=timezone.utc) 
     res = [test_date]
-    for i in range(24*4):
-        t = res[-1] + timedelta(minutes = 30)
-        res.append(t)
-    tstamps:Iterable[Numeric] = [r.timestamp() for r in res]
-    sza:Iterable[Numeric] = [solar_zenith_angle(t, latitude,longitude,elevation) for t in tstamps]
+    res = [test_date + timedelta(hours=i) for i in range(-12, 13)]
+    tstamps = [r.timestamp() for r in res]
+    sza = [solar_zenith_angle(t, latitude,longitude,elevation) for t in tstamps]
+    sza_pysolar = [
+        90 - get_altitude(latitude, longitude, r, elevation=elevation) for r in res
+    ]
+    sza_suncalc = [
+        90 - get_position(r, longitude, latitude)['altitude']*180/np.pi for r in res
+    ]
+    dawn = get_times(test_date, longitude, latitude)['nautical_dawn'] # today
+    dusk = get_times(test_date - timedelta(days=1), longitude, latitude)['nautical_dusk'] # previous day
 
 
     # altitude_deg = [get_altitude(latitude, longitude, r) for r in res]
@@ -64,13 +71,21 @@ if __name__ == '__main__':
 
 
     plt.plot(res,sza, ls=':') # type: ignore
+    plt.plot(res,sza_pysolar, ls='--') # type: ignore
+    plt.plot(res,sza_suncalc, ls='-.') # type: ignore
     # plt.plot(res, zenith_angle_deg, '--') # type: ignore
     plt.axhline(90, ls='-', color='k')
     plt.gcf().autofmt_xdate()
     plt.xlabel('time (UTC)')
     plt.ylabel('Solar Zenith Angle (deg)')
     plt.title('Location: Kiruna, Sweden')
-    plt.ylim(np.max(sza)+5, np.min(sza)-5)
+    plt.axvline(dusk, ls='--', color='orange', label='nautical dusk')
+    plt.axvline(dawn, ls='--', color='cyan', label='nautical dawn')
+    plt.axhline(112, ls='--', color='red', label='SZA=112°')
+    plt.axhline(96, ls='--', color='gray', label='SZA=96°')
+    plt.legend()
+    # plt.ylim(180, 0)
+    # plt.ylim(np.max(sza)+5, np.min(sza)-5)
     plt.show()
     
 #%%
