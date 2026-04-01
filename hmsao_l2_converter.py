@@ -15,7 +15,7 @@ from pathlib import Path
 import re
 
 from time import perf_counter_ns
-from util_functions import apply_alignment, apply_solar_subtraction
+
 import numpy as np
 import xarray as xr
 from sza import solar_zenith_angle
@@ -26,6 +26,7 @@ from pytz import timezone, UTC
 LOCALPATH = os.path.dirname(os.path.realpath(__file__))
 sys.path.append(os.path.join(LOCALPATH))
 from l2_converter.l2_helper_functions import get_feature_bounds
+from util_functions import apply_alignment, apply_solar_subtraction
 
 # %%
 
