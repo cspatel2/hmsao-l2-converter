@@ -5,6 +5,7 @@ import os
 import sys
 from glob import glob
 from dataclasses import dataclass
+import hdf5plugin
 from matplotlib import pyplot as plt
 from matplotlib.style import available
 from tqdm import tqdm
@@ -22,6 +23,8 @@ from sza import solar_zenith_angle
 from itertools import chain
 from datetime import datetime
 from pytz import timezone, UTC
+
+xr.set_options(netcdf_engine_order=["h5netcdf", "netcdf4", "scipy"])
 
 LOCALPATH = os.path.dirname(os.path.realpath(__file__))
 sys.path.append(os.path.join(LOCALPATH))
@@ -323,7 +326,7 @@ def l1c_to_l2_converter(win: str, date: str, config: L2Config, root_glob: str = 
 
     if config.save:
         # 3. save dataset
-        encoding = {var: {'zlib': True}
+        encoding = {var: hdf5plugin.Zstd(clevel=3)
                     for var in (*saveds.data_vars.keys(), *saveds.coords.keys())}
         print('Saving %s...\t' % (os.path.basename(outfn)), end='')
         sys.stdout.flush()
